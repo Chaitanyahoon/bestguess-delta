@@ -19,6 +19,7 @@ export function useSocket() {
 
     console.log("🔌 Initializing socket connection...")
 
+    // Try to connect with various options to bypass CORS
     const socketInstance = io("https://beatmatch-jbss.onrender.com", {
       transports: ["websocket", "polling"],
       timeout: 20000,
@@ -28,6 +29,10 @@ export function useSocket() {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       autoConnect: true,
+      withCredentials: false,
+      extraHeaders: {
+        Origin: "https://beatmatch-delta.vercel.app",
+      },
     })
 
     socketRef.current = socketInstance
@@ -38,23 +43,11 @@ export function useSocket() {
       setError(null)
       setSocket(socketInstance)
       reconnectAttempts.current = 0
-
-      // Test the connection with a ping
-      socketInstance.emit("ping")
-      socketInstance.once("pong", () => {
-        console.log("🏓 Initial ping successful")
-      })
     })
 
     socketInstance.on("disconnect", (reason) => {
       console.log("❌ Socket disconnected:", reason)
       setIsConnected(false)
-
-      if (reason === "io server disconnect") {
-        // Server disconnected, try to reconnect manually
-        console.log("🔄 Server disconnected, attempting manual reconnect...")
-        socketInstance.connect()
-      }
     })
 
     socketInstance.on("connect_error", (error) => {
@@ -62,43 +55,10 @@ export function useSocket() {
       setError(`Connection failed: ${error.message}`)
       setIsConnected(false)
       reconnectAttempts.current++
-
-      if (reconnectAttempts.current >= maxReconnectAttempts) {
-        setError("Connection failed after multiple attempts")
-      }
     })
-
-    socketInstance.on("reconnect", (attemptNumber) => {
-      console.log("🔄 Socket reconnected after", attemptNumber, "attempts")
-      setIsConnected(true)
-      setError(null)
-      reconnectAttempts.current = 0
-    })
-
-    socketInstance.on("reconnect_error", (error) => {
-      console.error("🔄 Socket reconnection failed:", error)
-      setError(`Reconnection failed: ${error.message}`)
-    })
-
-    socketInstance.on("reconnect_failed", () => {
-      console.error("💀 Socket reconnection failed permanently")
-      setError("Connection failed permanently - please refresh the page")
-    })
-
-    // Handle page visibility changes
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && !socketInstance.connected) {
-        console.log("🔄 Page became visible, checking connection...")
-        socketInstance.connect()
-      }
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange)
 
     return () => {
       console.log("🔌 Cleaning up socket connection...")
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-
       if (socketRef.current) {
         socketRef.current.removeAllListeners()
         socketRef.current.disconnect()
@@ -106,7 +66,6 @@ export function useSocket() {
       }
       setSocket(null)
       setIsConnected(false)
-      setError(null)
     }
   }, [])
 
