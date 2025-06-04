@@ -25,111 +25,79 @@ export default function GameRoom() {
   const isHost = searchParams.get("host") === "true"
 
   const [players, setPlayers] = useState<Player[]>([])
-  const [gameStarted, setGameStarted] = useState(false)
   const [copied, setCopied] = useState(false)
   const [roomError, setRoomError] = useState<string | null>(null)
   const [joinAttempts, setJoinAttempts] = useState(0)
-  const [logs, setLogs] = useState<string[]>([])
   const [isJoining, setIsJoining] = useState(false)
-  const hasJoinedRef = useRef(false)
+  const [hasJoined, setHasJoined] = useState(false)
   const joinTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const { socket, isConnected, error } = useSocket()
 
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString()
-    const logMessage = `[${timestamp}] ${message}`
-    console.log(logMessage)
-    setLogs((prev) => [...prev.slice(-9), logMessage])
-  }
-
   const attemptJoinRoom = () => {
-    if (!socket || !isConnected || !playerName || hasJoinedRef.current || isJoining) {
-      addLog(
-        `Cannot join: socket=${!!socket}, connected=${isConnected}, name=${!!playerName}, hasJoined=${hasJoinedRef.current}, isJoining=${isJoining}`,
-      )
+    if (!socket || !isConnected || !playerName || hasJoined || isJoining) {
+      console.log("Cannot join room:", { socket: !!socket, isConnected, playerName, hasJoined, isJoining })
       return
     }
 
+    console.log(`🚪 Joining room ${roomId} as ${playerName} (host: ${isHost})`)
     setIsJoining(true)
-    addLog(`Attempting to join room ${roomId} as ${playerName} (host: ${isHost})`)
     setJoinAttempts((prev) => prev + 1)
+    setRoomError(null)
 
     // Clear any existing timeout
     if (joinTimeoutRef.current) {
       clearTimeout(joinTimeoutRef.current)
     }
 
-    // Set a timeout for the join attempt
+    // Set timeout for join attempt
     joinTimeoutRef.current = setTimeout(() => {
-      if (isJoining && !hasJoinedRef.current) {
-        addLog("Join attempt timed out")
+      if (isJoining && !hasJoined) {
+        console.log("⏰ Join attempt timed out")
         setIsJoining(false)
-        setRoomError("Failed to join room - timeout")
+        setRoomError("Join attempt timed out. Please try again.")
       }
-    }, 10000)
+    }, 15000)
 
     socket.emit("join-room", {
       roomId: roomId.toUpperCase(),
       playerName: playerName.trim(),
       isHost,
     })
-
-    hasJoinedRef.current = true
   }
 
   useEffect(() => {
-    if (!roomId || !playerName) {
-      setRoomError("Missing room ID or player name")
-      return
-    }
-
-    if (roomId.length !== 6) {
-      setRoomError("Invalid room code format")
-      return
-    }
-
-    addLog("Room component mounted")
-  }, [roomId, playerName])
-
-  useEffect(() => {
-    if (!socket) {
-      addLog("No socket available")
-      return
-    }
-
-    addLog("Setting up socket listeners")
+    if (!socket) return
 
     const handleRoomUpdated = (data: any) => {
-      addLog(`Room updated: ${data.players?.length || 0} players`)
-      console.log("Room data received:", data)
+      console.log("📊 Room updated:", data)
 
       if (data.players && Array.isArray(data.players)) {
         setPlayers(data.players)
-        setRoomError(null)
+        setHasJoined(true)
         setIsJoining(false)
+        setRoomError(null)
 
-        // Clear join timeout on successful update
+        // Clear join timeout on success
         if (joinTimeoutRef.current) {
           clearTimeout(joinTimeoutRef.current)
           joinTimeoutRef.current = null
         }
-      } else {
-        addLog("Invalid room data received")
+
+        console.log(`✅ Successfully joined room with ${data.players.length} players`)
       }
     }
 
     const handleGameStarted = () => {
-      addLog("Game started, redirecting...")
-      setGameStarted(true)
+      console.log("🎮 Game started, redirecting...")
       router.push(`/game/${roomId}?name=${encodeURIComponent(playerName)}`)
     }
 
-    const handleRoomError = (error: any) => {
-      addLog(`Room error: ${error.message}`)
-      setRoomError(error.message)
+    const handleRoomError = (errorData: any) => {
+      console.error("❌ Room error:", errorData)
+      setRoomError(errorData.message || "Failed to join room")
       setIsJoining(false)
-      hasJoinedRef.current = false
+      setHasJoined(false)
 
       // Clear join timeout on error
       if (joinTimeoutRef.current) {
@@ -138,75 +106,43 @@ export default function GameRoom() {
       }
     }
 
-    const handleConnect = () => {
-      addLog("Socket connected, will attempt to join room")
-      hasJoinedRef.current = false
-      // Don't auto-join immediately, wait for user interaction or a delay
-      setTimeout(() => {
-        if (!hasJoinedRef.current) {
-          attemptJoinRoom()
-        }
-      }, 1000)
-    }
-
-    const handleDisconnect = () => {
-      addLog("Socket disconnected")
-      hasJoinedRef.current = false
-      setIsJoining(false)
-    }
-
     socket.on("room-updated", handleRoomUpdated)
     socket.on("game-started", handleGameStarted)
     socket.on("room-error", handleRoomError)
-    socket.on("connect", handleConnect)
-    socket.on("disconnect", handleDisconnect)
-
-    // If already connected, try to join
-    if (isConnected && !hasJoinedRef.current) {
-      addLog("Socket already connected, attempting to join")
-      setTimeout(() => {
-        if (!hasJoinedRef.current) {
-          attemptJoinRoom()
-        }
-      }, 500)
-    }
 
     return () => {
-      addLog("Cleaning up socket listeners")
       socket.off("room-updated", handleRoomUpdated)
       socket.off("game-started", handleGameStarted)
       socket.off("room-error", handleRoomError)
-      socket.off("connect", handleConnect)
-      socket.off("disconnect", handleDisconnect)
-
-      // Clear timeout on cleanup
-      if (joinTimeoutRef.current) {
-        clearTimeout(joinTimeoutRef.current)
-      }
     }
-  }, [socket, isConnected, roomId, playerName, isHost, router])
+  }, [socket, roomId, playerName, router])
+
+  // Auto-join when socket connects
+  useEffect(() => {
+    if (isConnected && !hasJoined && !isJoining) {
+      console.log("🔗 Socket connected, attempting to join room...")
+      setTimeout(attemptJoinRoom, 1000) // Small delay to ensure connection is stable
+    }
+  }, [isConnected, hasJoined, isJoining])
 
   const startGame = () => {
     if (!socket) {
-      addLog("Cannot start game: no socket connection")
       alert("No connection to server")
       return
     }
 
     if (players.length < 2) {
-      addLog(`Cannot start game: only ${players.length} players`)
       alert("Need at least 2 players to start the game")
       return
     }
 
     const currentPlayer = players.find((p) => p.name === playerName)
     if (!currentPlayer?.isHost) {
-      addLog("Cannot start game: not the host")
       alert("Only the host can start the game")
       return
     }
 
-    addLog("Starting game...")
+    console.log("🚀 Starting game...")
     socket.emit("start-game", roomId.toUpperCase())
   }
 
@@ -216,43 +152,36 @@ export default function GameRoom() {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
-      // Fallback for browsers that don't support clipboard API
-      const textArea = document.createElement("textarea")
-      textArea.value = roomId
-      document.body.appendChild(textArea)
-      textArea.select()
-      document.execCommand("copy")
-      document.body.removeChild(textArea)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      console.error("Failed to copy:", err)
     }
   }
 
   const retryJoin = () => {
-    addLog("Manual retry join")
-    hasJoinedRef.current = false
-    setRoomError(null)
+    console.log("🔄 Manual retry join")
+    setHasJoined(false)
     setIsJoining(false)
-    attemptJoinRoom()
+    setRoomError(null)
+    setTimeout(attemptJoinRoom, 500)
   }
 
   const currentPlayer = players.find((p) => p.name === playerName)
   const hostPlayer = players.find((p) => p.isHost)
 
-  if (roomError && !isConnected) {
+  // Show error if not connected
+  if (!isConnected && error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-600 via-blue-600 to-indigo-700 flex items-center justify-center p-4">
         <Card className="max-w-md">
           <CardContent className="pt-6 text-center">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">Connection Error</h2>
-            <p className="text-muted-foreground mb-4">{error || "Cannot connect to server"}</p>
+            <p className="text-muted-foreground mb-4">{error}</p>
             <div className="space-y-2">
               <Button onClick={() => router.push("/")} className="w-full">
                 Back to Home
               </Button>
-              <Button onClick={() => router.push("/test")} variant="outline" className="w-full">
-                Test Connection
+              <Button onClick={() => window.location.reload()} variant="outline" className="w-full">
+                Retry Connection
               </Button>
             </div>
           </CardContent>
@@ -265,7 +194,7 @@ export default function GameRoom() {
     <div className="min-h-screen bg-gradient-to-br from-purple-600 via-blue-600 to-indigo-700">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-2xl mx-auto">
-          {/* Connection Status */}
+          {/* Status Bar */}
           <div className="mb-4 flex justify-between items-center">
             <Badge variant={isConnected ? "default" : "destructive"}>
               {isConnected ? "Connected" : "Disconnected"}
@@ -280,6 +209,7 @@ export default function GameRoom() {
             </div>
           </div>
 
+          {/* Header */}
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-4">
               <Music className="w-8 h-8 text-white mr-3" />
@@ -299,6 +229,7 @@ export default function GameRoom() {
             </Card>
           </div>
 
+          {/* Error Display */}
           {roomError && (
             <Card className="mb-6 border-red-200">
               <CardContent className="pt-6">
@@ -316,20 +247,25 @@ export default function GameRoom() {
             </Card>
           )}
 
-          {/* Show waiting message if no players yet */}
-          {players.length === 0 && isConnected && !roomError && (
+          {/* Loading State */}
+          {isJoining && (
             <Card className="mb-6">
               <CardContent className="pt-6 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-muted-foreground">
-                  {isJoining ? "Joining room..." : "Waiting for players to join..."}
-                </p>
-                {!isJoining && (
-                  <Button onClick={retryJoin} variant="outline" className="mt-4">
-                    <RefreshCw className="w-4 h-4 mr-1" />
-                    Retry Join
-                  </Button>
-                )}
+                <p className="text-muted-foreground">Joining room...</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Waiting for Players */}
+          {!isJoining && players.length === 0 && isConnected && !roomError && (
+            <Card className="mb-6">
+              <CardContent className="pt-6 text-center">
+                <p className="text-muted-foreground mb-4">Waiting to join room...</p>
+                <Button onClick={retryJoin} variant="outline">
+                  <RefreshCw className="w-4 h-4 mr-1" />
+                  Try Join Again
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -369,28 +305,12 @@ export default function GameRoom() {
             </Card>
           )}
 
-          {/* Non-host waiting message */}
+          {/* Non-host waiting */}
           {!currentPlayer?.isHost && players.length > 0 && (
             <Card className="mb-6">
               <CardContent className="pt-6 text-center">
                 <p className="text-muted-foreground">Waiting for {hostPlayer?.name} to start the game...</p>
                 <p className="text-sm text-muted-foreground mt-2">{players.length}/2+ players ready</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Debug Logs */}
-          {process.env.NODE_ENV === "development" && logs.length > 0 && (
-            <Card>
-              <CardContent className="pt-6">
-                <h3 className="font-bold mb-2">Debug Logs:</h3>
-                <div className="bg-gray-100 p-2 rounded text-xs max-h-32 overflow-y-auto">
-                  {logs.map((log, index) => (
-                    <div key={index} className="font-mono">
-                      {log}
-                    </div>
-                  ))}
-                </div>
               </CardContent>
             </Card>
           )}

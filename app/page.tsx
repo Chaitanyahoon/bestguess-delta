@@ -5,16 +5,23 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
-import { Music, Users, Trophy, Play, Plus, ArrowRight, Sparkles, Settings } from "lucide-react"
+import { Music, Users, Trophy, Play, Plus, ArrowRight, Sparkles, Settings, RefreshCw, AlertCircle } from "lucide-react"
 import { ConnectionStatus } from "@/components/connection-status"
+import { useSocket } from "@/hooks/use-socket"
 
 export default function HomePage() {
   const [roomCode, setRoomCode] = useState("")
   const [playerName, setPlayerName] = useState("")
   const [isJoining, setIsJoining] = useState(false)
   const router = useRouter()
+  const { isConnected, error, isConnecting, reconnect } = useSocket()
 
   const joinGame = () => {
+    if (!isConnected) {
+      alert("Not connected to server. Please wait for connection or try reconnecting.")
+      return
+    }
+
     if (!roomCode.trim() || !playerName.trim()) {
       alert("Please enter both room code and your name")
       return
@@ -38,6 +45,11 @@ export default function HomePage() {
   }
 
   const createGame = () => {
+    if (!isConnected) {
+      alert("Not connected to server. Please wait for connection or try reconnecting.")
+      return
+    }
+
     if (!playerName.trim()) {
       alert("Please enter your name")
       return
@@ -53,6 +65,19 @@ export default function HomePage() {
 
     console.log(`Creating room: ${newRoomCode} as ${cleanPlayerName}`)
     router.push(`/room/${newRoomCode}?name=${encodeURIComponent(cleanPlayerName)}&host=true`)
+  }
+
+  const getConnectionMessage = () => {
+    if (isConnecting) {
+      return "🔄 Connecting to server..."
+    }
+    if (error) {
+      return "❌ Connection failed - Click reconnect to try again"
+    }
+    if (isConnected) {
+      return "✅ Connected to server"
+    }
+    return "⏳ Waiting for connection..."
   }
 
   return (
@@ -94,6 +119,30 @@ export default function HomePage() {
           </p>
         </div>
 
+        {/* Connection Error Alert */}
+        {error && (
+          <Card className="mb-6 border-red-200 animate-slide-up max-w-md mx-auto">
+            <CardContent className="p-4">
+              <div className="flex items-start space-x-3">
+                <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <h3 className="font-medium text-red-800 mb-1">Connection Problem</h3>
+                  <p className="text-sm text-red-600 mb-3">{error}</p>
+                  <div className="flex space-x-2">
+                    <Button onClick={reconnect} size="sm" variant="outline" disabled={isConnecting}>
+                      <RefreshCw className={`w-4 h-4 mr-1 ${isConnecting ? "animate-spin" : ""}`} />
+                      {isConnecting ? "Connecting..." : "Reconnect"}
+                    </Button>
+                    <Button onClick={() => router.push("/test")} size="sm" variant="ghost">
+                      Diagnose
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Main Content */}
         <div className="flex-1 flex items-center justify-center">
           <div className="w-full max-w-md space-y-6">
@@ -110,7 +159,8 @@ export default function HomePage() {
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
                     className="bg-white/10 border-white/30 text-white placeholder:text-white/50 text-center text-lg h-12 backdrop-blur-sm"
-                    onKeyPress={(e) => e.key === "Enter" && playerName.trim() && createGame()}
+                    onKeyPress={(e) => e.key === "Enter" && playerName.trim() && isConnected && createGame()}
+                    disabled={!isConnected}
                   />
                 </CardContent>
               </Card>
@@ -121,7 +171,7 @@ export default function HomePage() {
               {/* Create Game Button */}
               <Button
                 onClick={createGame}
-                disabled={!playerName.trim()}
+                disabled={!playerName.trim() || !isConnected || isConnecting}
                 className="w-full h-16 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold text-lg shadow-2xl transform transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
               >
                 <Plus className="w-6 h-6 mr-3" />
@@ -145,6 +195,7 @@ export default function HomePage() {
                 <Button
                   onClick={() => setIsJoining(true)}
                   variant="outline"
+                  disabled={!isConnected || isConnecting}
                   className="w-full h-16 border-white/30 text-white hover:bg-white/10 font-bold text-lg backdrop-blur-sm"
                 >
                   <Play className="w-6 h-6 mr-3" />
@@ -157,12 +208,15 @@ export default function HomePage() {
                     value={roomCode}
                     onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                     className="bg-white/10 border-white/30 text-white placeholder:text-white/50 text-center text-lg h-12 backdrop-blur-sm"
-                    onKeyPress={(e) => e.key === "Enter" && roomCode.trim() && playerName.trim() && joinGame()}
+                    onKeyPress={(e) =>
+                      e.key === "Enter" && roomCode.trim() && playerName.trim() && isConnected && joinGame()
+                    }
+                    disabled={!isConnected}
                   />
                   <div className="flex space-x-3">
                     <Button
                       onClick={joinGame}
-                      disabled={!roomCode.trim() || !playerName.trim()}
+                      disabled={!roomCode.trim() || !playerName.trim() || !isConnected || isConnecting}
                       className="flex-1 h-12 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold"
                     >
                       Join Now
@@ -206,7 +260,7 @@ export default function HomePage() {
         {/* Footer */}
         <div className="text-center text-white/50 text-sm animate-fade-in-delay">
           <p>🎵 Powered by Spotify API • Built for music lovers</p>
-          <p className="mt-2 text-xs">Backend: beatmatch-jbss.onrender.com</p>
+          <p className="mt-2 text-xs">{getConnectionMessage()}</p>
         </div>
       </div>
     </div>

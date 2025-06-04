@@ -3,11 +3,6 @@ const nextConfig = {
   experimental: {
     appDir: true,
   },
-  env: {
-    NEXT_PUBLIC_SOCKET_URL: process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com",
-    SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID || "6505035b2eb34f5ab9abecf157a93ae1",
-    SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET || "473b90d3fb4b4d75a68808271870585d",
-  },
   eslint: {
     ignoreDuringBuilds: true,
   },

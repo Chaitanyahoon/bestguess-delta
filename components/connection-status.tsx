@@ -2,53 +2,27 @@
 
 import { useState, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
-import { Wifi, WifiOff, AlertTriangle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Wifi, WifiOff, AlertTriangle, Loader2, RefreshCw } from "lucide-react"
 import { useSocket } from "@/hooks/use-socket"
 
 export function ConnectionStatus() {
-  const [isConnecting, setIsConnecting] = useState(true)
-  const { socket, isConnected, error } = useSocket()
+  const { socket, isConnected, error, isConnecting, reconnect } = useSocket()
+  const [showReconnect, setShowReconnect] = useState(false)
 
   useEffect(() => {
-    if (!socket) return
-
-    const handleConnect = () => {
-      setIsConnecting(false)
+    if (error && !isConnecting) {
+      setShowReconnect(true)
+    } else {
+      setShowReconnect(false)
     }
-
-    const handleDisconnect = () => {
-      setIsConnecting(false)
-    }
-
-    const handleConnectError = () => {
-      setIsConnecting(false)
-    }
-
-    const handleReconnecting = () => {
-      setIsConnecting(true)
-    }
-
-    socket.on("connect", handleConnect)
-    socket.on("disconnect", handleDisconnect)
-    socket.on("connect_error", handleConnectError)
-    socket.on("reconnect_attempt", handleReconnecting)
-
-    // Set initial state
-    setIsConnecting(!socket.connected)
-
-    return () => {
-      socket.off("connect", handleConnect)
-      socket.off("disconnect", handleDisconnect)
-      socket.off("connect_error", handleConnectError)
-      socket.off("reconnect_attempt", handleReconnecting)
-    }
-  }, [socket])
+  }, [error, isConnecting])
 
   const getStatusInfo = () => {
     if (isConnecting) {
       return {
         variant: "secondary" as const,
-        icon: <Wifi className="w-3 h-3 mr-1 animate-pulse" />,
+        icon: <Loader2 className="w-3 h-3 mr-1 animate-spin" />,
         text: "Connecting...",
       }
     }
@@ -79,9 +53,17 @@ export function ConnectionStatus() {
   const status = getStatusInfo()
 
   return (
-    <Badge variant={status.variant} className="fixed top-4 right-4 z-50">
-      {status.icon}
-      {status.text}
-    </Badge>
+    <div className="fixed top-4 right-4 z-50 flex items-center space-x-2">
+      <Badge variant={status.variant}>
+        {status.icon}
+        {status.text}
+      </Badge>
+      {showReconnect && (
+        <Button onClick={reconnect} size="sm" variant="outline" className="h-6 px-2 text-xs">
+          <RefreshCw className="w-3 h-3 mr-1" />
+          Reconnect
+        </Button>
+      )}
+    </div>
   )
 }
