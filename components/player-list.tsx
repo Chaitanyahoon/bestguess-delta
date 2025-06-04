@@ -22,6 +22,26 @@ interface PlayerListProps {
 export function PlayerList({ players, currentPlayerName, showScores = true, title = "Players" }: PlayerListProps) {
   const sortedPlayers = showScores ? [...players].sort((a, b) => b.score - a.score) : players
 
+  if (players.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Users className="w-5 h-5 mr-2" />
+            {title} (0)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-muted-foreground">
+            <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p>No players in the room yet</p>
+            <p className="text-sm mt-2">Waiting for players to join...</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -56,6 +76,11 @@ export function PlayerList({ players, currentPlayerName, showScores = true, titl
                     {player.name === currentPlayerName && (
                       <Badge variant="secondary" className="text-xs">
                         You
+                      </Badge>
+                    )}
+                    {player.isHost && (
+                      <Badge variant="outline" className="text-xs">
+                        Host
                       </Badge>
                     )}
                   </div>

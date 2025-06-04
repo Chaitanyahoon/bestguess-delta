@@ -1,27 +1,18 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
-import { Music, Users, Trophy, Play, Plus, ArrowRight, Sparkles, Settings, AlertCircle } from "lucide-react"
+import { Music, Users, Trophy, Play, Plus, ArrowRight, Sparkles, Settings } from "lucide-react"
 import { ConnectionStatus } from "@/components/connection-status"
 
 export default function HomePage() {
   const [roomCode, setRoomCode] = useState("")
   const [playerName, setPlayerName] = useState("")
   const [isJoining, setIsJoining] = useState(false)
-  const [corsWarning, setCorsWarning] = useState(false)
   const router = useRouter()
-
-  useEffect(() => {
-    // Check if we're on the wrong domain
-    const hostname = window.location.hostname
-    if (hostname.includes("bestguess") && !hostname.includes("beatmatch")) {
-      setCorsWarning(true)
-    }
-  }, [])
 
   const joinGame = () => {
     if (!roomCode.trim() || !playerName.trim()) {
@@ -87,22 +78,6 @@ export default function HomePage() {
       </div>
 
       <div className="relative z-10 container mx-auto px-4 py-8 min-h-screen flex flex-col">
-        {/* CORS Warning */}
-        {corsWarning && (
-          <div className="bg-red-500/80 text-white p-3 rounded-lg mb-4 animate-pulse">
-            <div className="flex items-center">
-              <AlertCircle className="w-5 h-5 mr-2" />
-              <div>
-                <p className="font-bold">Domain Mismatch Detected</p>
-                <p className="text-sm">
-                  You're on <code>bestguess-delta.vercel.app</code> but the backend expects{" "}
-                  <code>beatmatch-delta.vercel.app</code>
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Header */}
         <div className="text-center mb-12 animate-fade-in">
           <div className="flex items-center justify-center mb-6">
