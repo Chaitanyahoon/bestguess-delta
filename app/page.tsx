@@ -67,7 +67,7 @@ export default function HomePage() {
         className="fixed top-4 left-4 z-50 bg-white/10 border-white/20 text-white hover:bg-white/20"
       >
         <Settings className="w-4 h-4 mr-1" />
-        Test
+        Test Connection
       </Button>
 
       {/* Animated Background Elements */}

@@ -45,14 +45,15 @@ export function DeploymentStatus() {
     } catch (error) {
       setStatus((prev) => ({
         ...prev,
-        backend: { status: "error", url: "https://beatmatch-jbss.onrender.com" },
+        backend: { status: "error", url: "https://beatmatch-backend.onrender.com" },
       }))
     }
 
     // Check socket connection
     try {
       const { io } = await import("socket.io-client")
-      const testSocket = io("https://beatmatch-jbss.onrender.com", {
+      const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com"
+      const testSocket = io(backendUrl, {
         timeout: 5000,
         forceNew: true,
       })

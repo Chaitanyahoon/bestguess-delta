@@ -47,7 +47,9 @@ export function ConnectionTest() {
     // Test 1: Backend Health Check
     try {
       addLog("Testing backend health...")
-      const response = await fetch("https://beatmatch-jbss.onrender.com/health", {
+      // Update the backend URL
+      const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com"
+      const response = await fetch(`${backendUrl}/health`, {
         mode: "cors",
         headers: {
           Accept: "application/json",
@@ -70,7 +72,8 @@ export function ConnectionTest() {
     // Test CORS
     try {
       addLog("Testing CORS configuration...")
-      const response = await fetch("https://beatmatch-jbss.onrender.com/", {
+      const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com"
+      const response = await fetch(`${backendUrl}/`, {
         mode: "cors",
         headers: {
           Accept: "application/json",
@@ -93,9 +96,11 @@ export function ConnectionTest() {
     try {
       addLog("Testing socket connection...")
       const { io } = await import("socket.io-client")
-      const testSocket = io("https://beatmatch-jbss.onrender.com", {
+      const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com"
+      // Also update the socket connection test
+      const testSocket = io(backendUrl, {
         transports: ["websocket", "polling"],
-        timeout: 10000,
+        timeout: 5000,
         forceNew: true,
         withCredentials: false,
       })
@@ -174,7 +179,7 @@ export function ConnectionTest() {
           testSocket.disconnect()
           setIsRunning(false)
         }
-      }, 10000)
+      }, 5000)
     } catch (error) {
       updateTest("socket", "error", `Socket error: ${error}`)
       updateTest("ping", "error", "Cannot ping - socket error")
@@ -294,7 +299,7 @@ export function ConnectionTest() {
         </div>
 
         <div className="text-xs text-center text-muted-foreground">
-          <p>Backend: https://beatmatch-jbss.onrender.com</p>
+          <p>Backend: https://beatmatch-backend.onrender.com</p>
           <p className="mt-1">If tests fail, check if the backend server is running</p>
         </div>
       </CardContent>
