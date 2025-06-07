@@ -4,153 +4,119 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, XCircle, AlertCircle, Loader2, ExternalLink } from "lucide-react"
+import { CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react"
 
 export function ConnectionTest() {
   const [tests, setTests] = useState({
-    backend: { status: "pending", message: "", details: "" },
-    socket: { status: "pending", message: "", details: "" },
-    ping: { status: "pending", message: "", details: "" },
+    backend: { status: "pending", message: "" },
+    socket: { status: "pending", message: "" },
+    ping: { status: "pending", message: "" },
   })
   const [isRunning, setIsRunning] = useState(false)
-  const [serverInfo, setServerInfo] = useState<any>(null)
+  const [corsTest, setCorsTest] = useState({ status: "pending", message: "" })
 
-  const updateTest = (test: string, status: string, message: string, details = "") => {
+  const updateTest = (test: string, status: string, message: string) => {
     setTests((prev) => ({
       ...prev,
-      [test]: { status, message, details },
+      [test]: { status, message },
     }))
   }
 
   const runTests = async () => {
     setIsRunning(true)
-    setServerInfo(null)
 
     // Reset tests
     setTests({
-      backend: { status: "pending", message: "", details: "" },
-      socket: { status: "pending", message: "", details: "" },
-      ping: { status: "pending", message: "", details: "" },
+      backend: { status: "pending", message: "" },
+      socket: { status: "pending", message: "" },
+      ping: { status: "pending", message: "" },
     })
-
-    const backendUrl = "https://beatmatch-jbss.onrender.com"
+    setCorsTest({ status: "pending", message: "" })
 
     // Test 1: Backend Health Check
     try {
-      updateTest("backend", "pending", "Testing backend connection...", "Checking if server is online")
-
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
-
-      const response = await fetch(`${backendUrl}/health`, {
-        method: "GET",
+      const response = await fetch("https://beatmatch-jbss.onrender.com/health", {
         mode: "cors",
-        cache: "no-cache",
-        signal: controller.signal,
         headers: {
           Accept: "application/json",
-          "User-Agent": "BeatMatch-Test",
+        },
+      })
+      const data = await response.json()
+
+      if (response.ok && data.status === "OK") {
+        updateTest("backend", "success", `Backend OK - ${data.rooms} rooms, ${data.players} players`)
+      } else {
+        updateTest("backend", "error", "Backend not responding correctly")
+      }
+    } catch (error) {
+      updateTest("backend", "error", `Backend unreachable: ${error}`)
+    }
+
+    // Test CORS
+    try {
+      const response = await fetch("https://beatmatch-jbss.onrender.com/", {
+        mode: "cors",
+        headers: {
+          Accept: "application/json",
         },
       })
 
-      clearTimeout(timeoutId)
-
       if (response.ok) {
-        try {
-          const data = await response.json()
-          setServerInfo(data)
-          if (data.status === "OK") {
-            updateTest(
-              "backend",
-              "success",
-              "Backend server is online",
-              `Rooms: ${data.rooms || 0}, Players: ${data.players || 0}, Uptime: ${data.uptime || "unknown"}`,
-            )
-          } else {
-            updateTest("backend", "error", "Backend returned unexpected response", JSON.stringify(data))
-          }
-        } catch (e) {
-          updateTest("backend", "error", "Backend returned invalid JSON", "Server might be starting up")
-        }
+        setCorsTest({ status: "success", message: "CORS is properly configured" })
       } else {
-        updateTest("backend", "error", `Backend returned HTTP ${response.status}`, `${response.statusText}`)
+        setCorsTest({ status: "error", message: "CORS test failed" })
       }
-    } catch (error: any) {
-      if (error.name === "AbortError") {
-        updateTest("backend", "error", "Backend request timed out", "Server might be sleeping or overloaded")
-      } else {
-        updateTest("backend", "error", "Cannot reach backend server", error.message || "Network error")
-      }
+    } catch (error) {
+      setCorsTest({ status: "error", message: `CORS error: ${error}` })
     }
 
     // Test 2: Socket Connection
     try {
-      updateTest(
-        "socket",
-        "pending",
-        "Testing socket connection...",
-        "Attempting to establish WebSocket/polling connection",
-      )
-
       const { io } = await import("socket.io-client")
-      const testSocket = io(backendUrl, {
-        transports: ["polling"],
-        timeout: 15000,
+      const testSocket = io("https://beatmatch-jbss.onrender.com", {
+        transports: ["websocket", "polling"],
+        timeout: 10000,
         forceNew: true,
         withCredentials: false,
-        upgrade: false,
       })
-
-      let socketConnected = false
-      let pingReceived = false
 
       testSocket.on("connect", () => {
-        socketConnected = true
-        updateTest("socket", "success", "Socket connected successfully", `Socket ID: ${testSocket.id}`)
+        updateTest("socket", "success", `Connected with ID: ${testSocket.id}`)
 
         // Test 3: Ping Test
-        updateTest("ping", "pending", "Testing ping...", "Sending ping to test real-time communication")
         testSocket.emit("ping")
-      })
+        testSocket.once("pong", () => {
+          updateTest("ping", "success", "Ping successful")
+          testSocket.disconnect()
+          setIsRunning(false)
+        })
 
-      testSocket.on("pong", () => {
-        pingReceived = true
-        updateTest("ping", "success", "Ping successful", "Real-time communication is working")
-        testSocket.disconnect()
-        setIsRunning(false)
+        setTimeout(() => {
+          if (tests.ping.status === "pending") {
+            updateTest("ping", "error", "Ping timeout")
+            testSocket.disconnect()
+            setIsRunning(false)
+          }
+        }, 5000)
       })
 
       testSocket.on("connect_error", (error) => {
-        updateTest("socket", "error", "Socket connection failed", error.message)
-        if (!pingReceived) {
-          updateTest("ping", "error", "Ping test skipped", "No socket connection available")
-        }
+        updateTest("socket", "error", `Connection failed: ${error.message}`)
+        updateTest("ping", "error", "Cannot ping - no connection")
         setIsRunning(false)
       })
 
-      // Set timeout for socket test
       setTimeout(() => {
-        if (!socketConnected) {
-          updateTest("socket", "error", "Socket connection timed out", "Server might not support real-time connections")
-          if (!pingReceived) {
-            updateTest("ping", "error", "Ping test skipped", "Connection timed out")
-          }
+        if (tests.socket.status === "pending") {
+          updateTest("socket", "error", "Connection timeout")
+          updateTest("ping", "error", "Cannot ping - no connection")
           testSocket.disconnect()
           setIsRunning(false)
         }
-      }, 15000)
-
-      // Set timeout for ping test
-      setTimeout(() => {
-        if (socketConnected && !pingReceived) {
-          updateTest("ping", "error", "Ping timed out", "Socket connected but ping/pong not working")
-          testSocket.disconnect()
-          setIsRunning(false)
-        }
-      }, 20000)
-    } catch (error: any) {
-      updateTest("socket", "error", "Socket initialization failed", error.message)
-      updateTest("ping", "error", "Ping test skipped", "Socket initialization failed")
+      }, 10000)
+    } catch (error) {
+      updateTest("socket", "error", `Socket error: ${error}`)
+      updateTest("ping", "error", "Cannot ping - socket error")
       setIsRunning(false)
     }
   }
@@ -179,9 +145,9 @@ export function ConnectionTest() {
       case "error":
         return <Badge variant="destructive">FAIL</Badge>
       case "pending":
-        return <Badge variant="secondary">{isRunning ? "Testing..." : "Waiting"}</Badge>
+        return <Badge variant="secondary">{isRunning ? "..." : "WAIT"}</Badge>
       default:
-        return <Badge variant="secondary">Waiting</Badge>
+        return <Badge variant="secondary">WAIT</Badge>
     }
   }
 
@@ -190,54 +156,56 @@ export function ConnectionTest() {
   }, [])
 
   return (
-    <Card className="w-full">
+    <Card className="w-full max-w-md mx-auto">
       <CardHeader>
         <CardTitle className="text-center">Connection Diagnostics</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-4">
-          {Object.entries(tests).map(([testName, test]) => (
-            <div key={testName} className="space-y-2">
-              <div className="flex items-center justify-between p-3 border rounded">
-                <div className="flex items-center space-x-2">
-                  {getStatusIcon(test.status)}
-                  <span className="font-medium capitalize">
-                    {testName} {testName === "backend" ? "Health" : testName === "socket" ? "Connection" : "Test"}
-                  </span>
-                </div>
-                {getStatusBadge(test.status)}
-              </div>
-              {test.message && <p className="text-sm text-muted-foreground ml-6">{test.message}</p>}
-              {test.details && <p className="text-xs text-muted-foreground ml-6 opacity-75">{test.details}</p>}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-3 border rounded">
+            <div className="flex items-center space-x-2">
+              {getStatusIcon(tests.backend.status)}
+              <span className="font-medium">Backend Health</span>
             </div>
-          ))}
-        </div>
-
-        {serverInfo && (
-          <div className="mt-4 p-3 bg-muted rounded-lg">
-            <h4 className="font-medium mb-2">Server Information</h4>
-            <div className="text-sm space-y-1">
-              <p>Status: {serverInfo.status}</p>
-              <p>Rooms: {serverInfo.rooms || 0}</p>
-              <p>Players: {serverInfo.players || 0}</p>
-              {serverInfo.uptime && <p>Uptime: {serverInfo.uptime}</p>}
-            </div>
+            {getStatusBadge(tests.backend.status)}
           </div>
-        )}
+          {tests.backend.message && <p className="text-sm text-muted-foreground ml-6">{tests.backend.message}</p>}
+
+          <div className="flex items-center justify-between p-3 border rounded">
+            <div className="flex items-center space-x-2">
+              {getStatusIcon(corsTest.status)}
+              <span className="font-medium">CORS Configuration</span>
+            </div>
+            {getStatusBadge(corsTest.status)}
+          </div>
+          {corsTest.message && <p className="text-sm text-muted-foreground ml-6">{corsTest.message}</p>}
+
+          <div className="flex items-center justify-between p-3 border rounded">
+            <div className="flex items-center space-x-2">
+              {getStatusIcon(tests.socket.status)}
+              <span className="font-medium">Socket Connection</span>
+            </div>
+            {getStatusBadge(tests.socket.status)}
+          </div>
+          {tests.socket.message && <p className="text-sm text-muted-foreground ml-6">{tests.socket.message}</p>}
+
+          <div className="flex items-center justify-between p-3 border rounded">
+            <div className="flex items-center space-x-2">
+              {getStatusIcon(tests.ping.status)}
+              <span className="font-medium">Ping Test</span>
+            </div>
+            {getStatusBadge(tests.ping.status)}
+          </div>
+          {tests.ping.message && <p className="text-sm text-muted-foreground ml-6">{tests.ping.message}</p>}
+        </div>
 
         <Button onClick={runTests} disabled={isRunning} className="w-full">
           {isRunning ? "Running Tests..." : "Run Tests Again"}
         </Button>
 
-        <div className="text-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.open("https://beatmatch-jbss.onrender.com/health", "_blank")}
-          >
-            <ExternalLink className="w-4 h-4 mr-1" />
-            Check Server Directly
-          </Button>
+        <div className="text-xs text-center text-muted-foreground">
+          <p>Backend: https://beatmatch-jbss.onrender.com</p>
+          <p className="mt-1">If tests fail, check if the backend server is running</p>
         </div>
       </CardContent>
     </Card>

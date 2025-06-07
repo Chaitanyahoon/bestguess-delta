@@ -133,6 +133,16 @@
   }
 }
 
+@keyframes bounce-once {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
 .animate-fade-in {
   animation: fade-in 0.8s ease-out;
 }
@@ -171,4 +181,8 @@
 
 .animate-spin-slow {
   animation: spin-slow 20s linear infinite;
+}
+
+.animate-bounce-once {
+  animation: bounce-once 1s ease-in-out;
 }
