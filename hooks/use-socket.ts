@@ -8,17 +8,19 @@ export function useSocket() {
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const socketRef = useRef<Socket | null>(null)
+  const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com"
 
   useEffect(() => {
     // Prevent multiple connections
     if (socketRef.current) {
+      console.log("Socket already exists, reusing existing connection")
       return
     }
 
-    console.log("🔌 Initializing socket connection to https://beatmatch-jbss.onrender.com")
+    console.log(`🔌 Initializing socket connection to ${socketUrl}`)
 
     try {
-      const socketInstance = io("https://beatmatch-jbss.onrender.com", {
+      const socketInstance = io(socketUrl, {
         transports: ["websocket", "polling"],
         timeout: 30000,
         forceNew: true,
@@ -28,6 +30,10 @@ export function useSocket() {
         reconnectionDelayMax: 5000,
         autoConnect: true,
         withCredentials: false, // Important for CORS
+        query: {
+          clientTime: new Date().toISOString(),
+          clientId: `client-${Math.random().toString(36).substring(2, 9)}`,
+        },
       })
 
       socketRef.current = socketInstance
@@ -93,7 +99,20 @@ export function useSocket() {
       setError("Socket initialization failed")
       return () => {}
     }
-  }, [])
+  }, [socketUrl])
 
-  return { socket, isConnected, error }
+  // Expose a function to manually reconnect
+  const reconnect = () => {
+    console.log("🔄 Manual reconnection requested")
+    if (socketRef.current) {
+      socketRef.current.disconnect()
+      socketRef.current.connect()
+    } else {
+      // If socket doesn't exist, force a re-render to create a new one
+      setSocket(null)
+      socketRef.current = null
+    }
+  }
+
+  return { socket, isConnected, error, reconnect }
 }
