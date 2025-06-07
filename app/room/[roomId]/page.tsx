@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Copy, Check, Music, Users, Crown, Play, AlertCircle } from "lucide-react"
+import { Copy, Check, Music, Users, Crown, Play, AlertCircle, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { RoomJoiner } from "@/components/room-joiner"
 import { useSocket } from "@/hooks/use-socket"
@@ -26,9 +26,10 @@ export default function GameRoom() {
 
   const [players, setPlayers] = useState<Player[]>([])
   const [copied, setCopied] = useState(false)
-  const [hasJoined, setHasJoined] = useState(false)
+  const [hasJoined, setHasJoined] = useState(isHost) // Host is automatically "joined"
   const [joinError, setJoinError] = useState<string | null>(null)
   const [logs, setLogs] = useState<string[]>([])
+  const [isCreatingRoom, setIsCreatingRoom] = useState(isHost)
 
   const { socket, isConnected, error } = useSocket()
 
@@ -50,6 +51,58 @@ export default function GameRoom() {
       return
     }
   }, [roomId, playerName, router])
+
+  // Auto-create room for host
+  useEffect(() => {
+    if (!socket || !isConnected || !isHost || !isCreatingRoom) {
+      return
+    }
+
+    addLog("Host creating room automatically...")
+
+    const createRoom = () => {
+      const roomData = {
+        roomId: roomId.toUpperCase().trim(),
+        playerName: playerName.trim(),
+        isHost: true,
+      }
+
+      addLog(`Creating room: ${JSON.stringify(roomData)}`)
+
+      const timeout = setTimeout(() => {
+        addLog("Room creation timeout")
+        setJoinError("Failed to create room - server timeout")
+        setIsCreatingRoom(false)
+      }, 10000)
+
+      const handleRoomUpdated = (data: any) => {
+        clearTimeout(timeout)
+        socket.off("room-updated", handleRoomUpdated)
+        socket.off("room-error", handleRoomError)
+        addLog(`Room created successfully: ${data.players?.length || 0} players`)
+        setPlayers(data.players || [])
+        setHasJoined(true)
+        setIsCreatingRoom(false)
+        setJoinError(null)
+      }
+
+      const handleRoomError = (error: any) => {
+        clearTimeout(timeout)
+        socket.off("room-updated", handleRoomUpdated)
+        socket.off("room-error", handleRoomError)
+        addLog(`Room creation error: ${error.message || error}`)
+        setJoinError(error.message || error)
+        setIsCreatingRoom(false)
+      }
+
+      socket.once("room-updated", handleRoomUpdated)
+      socket.once("room-error", handleRoomError)
+
+      socket.emit("join-room", roomData)
+    }
+
+    createRoom()
+  }, [socket, isConnected, isHost, roomId, playerName, isCreatingRoom])
 
   const handleJoinSuccess = (data: any) => {
     addLog("Join successful")
@@ -125,19 +178,13 @@ export default function GameRoom() {
     socket.on("game-started", handleGameStarted)
     socket.on("room-error", handleRoomError)
 
-    // Request current room state when socket is ready
-    if (isConnected) {
-      addLog("Requesting current room state...")
-      socket.emit("get-room-state", { roomId })
-    }
-
     return () => {
       addLog("Cleaning up room socket listeners")
       socket.off("room-updated", handleRoomUpdated)
       socket.off("game-started", handleGameStarted)
       socket.off("room-error", handleRoomError)
     }
-  }, [socket, hasJoined, roomId, playerName, router, isConnected])
+  }, [socket, hasJoined, roomId, playerName, router])
 
   if (!roomId || !playerName) {
     return null // Will redirect
@@ -179,8 +226,21 @@ export default function GameRoom() {
             </Card>
           )}
 
-          {/* Room Joiner Component */}
-          {!hasJoined && (
+          {/* Host Room Creation Status */}
+          {isHost && isCreatingRoom && (
+            <Card className="mb-6 border-blue-200 bg-blue-50">
+              <CardContent className="pt-6">
+                <div className="flex items-center space-x-2 text-blue-600">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="font-medium">Creating Room...</span>
+                </div>
+                <p className="text-sm text-blue-600 mt-1">Setting up your game room</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Room Joiner Component - Only for non-hosts */}
+          {!isHost && !hasJoined && (
             <RoomJoiner
               roomId={roomId}
               playerName={playerName}
@@ -190,8 +250,33 @@ export default function GameRoom() {
             />
           )}
 
+          {/* Error Display */}
+          {joinError && (
+            <Card className="mb-6 border-red-200 bg-red-50">
+              <CardContent className="pt-6">
+                <div className="flex items-center space-x-2 text-red-600">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="font-medium">Error</span>
+                </div>
+                <p className="text-sm text-red-600 mt-1">{joinError}</p>
+                {isHost && (
+                  <Button
+                    onClick={() => {
+                      setJoinError(null)
+                      setIsCreatingRoom(true)
+                    }}
+                    className="mt-2"
+                    size="sm"
+                  >
+                    Retry Creating Room
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Players List - Only show when joined */}
-          {hasJoined && (
+          {hasJoined && !isCreatingRoom && (
             <Card className="mb-6">
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -229,6 +314,9 @@ export default function GameRoom() {
                 {players.length < 2 && (
                   <div className="text-center mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                     <p className="text-sm text-yellow-800">Waiting for more players... (minimum 2 players required)</p>
+                    <p className="text-xs text-yellow-600 mt-1">
+                      Share room code: <strong>{roomId}</strong>
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -236,7 +324,7 @@ export default function GameRoom() {
           )}
 
           {/* Host Controls - Only show when joined and is host */}
-          {hasJoined && isHost && (
+          {hasJoined && isHost && !isCreatingRoom && (
             <Card className="mb-6">
               <CardHeader>
                 <CardTitle>Host Controls</CardTitle>
@@ -249,7 +337,7 @@ export default function GameRoom() {
                   size="lg"
                 >
                   <Play className="w-5 h-5 mr-2" />
-                  Start Game
+                  Start Game ({players.length} players)
                 </Button>
                 {players.length < 2 && (
                   <p className="text-sm text-muted-foreground text-center mt-2">Need at least 2 players to start</p>
@@ -262,7 +350,7 @@ export default function GameRoom() {
           )}
 
           {/* Player Waiting - Only show when joined and not host */}
-          {hasJoined && !isHost && (
+          {hasJoined && !isHost && !isCreatingRoom && (
             <Card className="mb-6">
               <CardHeader>
                 <CardTitle>Waiting for Host</CardTitle>
@@ -270,6 +358,9 @@ export default function GameRoom() {
               <CardContent className="text-center">
                 <p className="text-muted-foreground">
                   Waiting for {hostPlayer?.name || "the host"} to start the game...
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {players.length} player{players.length !== 1 ? "s" : ""} in room
                 </p>
               </CardContent>
             </Card>
