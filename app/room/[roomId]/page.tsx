@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Copy, Check, Music, Users, Crown, Play } from "lucide-react"
+import { Copy, Check, Music, Users, Crown, Play, AlertCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { RoomJoiner } from "@/components/room-joiner"
 import { useSocket } from "@/hooks/use-socket"
@@ -28,7 +28,16 @@ export default function GameRoom() {
   const [copied, setCopied] = useState(false)
   const [hasJoined, setHasJoined] = useState(false)
   const [joinError, setJoinError] = useState<string | null>(null)
-  const { socket, isConnected, error, reconnect } = useSocket()
+  const [logs, setLogs] = useState<string[]>([])
+
+  const { socket, isConnected, error } = useSocket()
+
+  const addLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString()
+    const logMessage = `[${timestamp}] ${message}`
+    console.log(logMessage)
+    setLogs((prev) => [...prev.slice(-9), logMessage])
+  }
 
   useEffect(() => {
     if (!roomId || !playerName) {
@@ -43,6 +52,7 @@ export default function GameRoom() {
   }, [roomId, playerName, router])
 
   const handleJoinSuccess = (data: any) => {
+    addLog("Join successful")
     console.log("Join successful:", data)
     setPlayers(data.players || [])
     setHasJoined(true)
@@ -50,6 +60,7 @@ export default function GameRoom() {
   }
 
   const handleJoinError = (error: string) => {
+    addLog(`Join failed: ${error}`)
     console.error("Join failed:", error)
     setJoinError(error)
     setHasJoined(false)
@@ -61,63 +72,72 @@ export default function GameRoom() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const startGame = () => {
+    if (!socket || !hasJoined) {
+      addLog("Cannot start game - not connected or not joined")
+      return
+    }
+
+    if (players.length < 2) {
+      addLog("Cannot start game - need at least 2 players")
+      return
+    }
+
+    addLog("Starting game...")
+    socket.emit("start-game", { roomId })
+
+    // Add timeout for game start
+    setTimeout(() => {
+      addLog("Game start timeout - checking if game started...")
+    }, 10000)
+  }
+
   const currentPlayer = players.find((p) => p.name === playerName)
   const hostPlayer = players.find((p) => p.isHost)
 
   useEffect(() => {
-    if (!socket) {
-      console.log("No socket available")
+    if (!socket || !hasJoined) {
       return
     }
 
-    console.log("Setting up socket listeners")
+    addLog("Setting up room socket listeners")
 
     const handleRoomUpdated = (data: any) => {
-      console.log(`Room updated: ${data.players?.length || 0} players`)
+      addLog(`Room updated: ${data.players?.length || 0} players`)
+      console.log("Room updated:", data)
       setPlayers(data.players || [])
       setJoinError(null)
     }
 
     const handleGameStarted = () => {
+      addLog("Game started, redirecting...")
       console.log("Game started, redirecting...")
       router.push(`/game/${roomId}?name=${encodeURIComponent(playerName)}`)
     }
 
     const handleRoomError = (error: any) => {
-      console.error(`Room error: ${error.message}`)
-      setJoinError(error.message)
-    }
-
-    const handleConnect = () => {
-      console.log("Socket connected, attempting to join room")
-      if (!hasJoined) {
-        socket.emit("join-room", {
-          roomId: roomId.toUpperCase(),
-          playerName: playerName.trim(),
-          isHost,
-        })
-      }
-    }
-
-    const handleDisconnect = () => {
-      console.log("Socket disconnected")
+      addLog(`Room error: ${error.message || error}`)
+      console.error("Room error:", error)
+      setJoinError(error.message || error)
     }
 
     socket.on("room-updated", handleRoomUpdated)
     socket.on("game-started", handleGameStarted)
     socket.on("room-error", handleRoomError)
-    socket.on("connect", handleConnect)
-    socket.on("disconnect", handleDisconnect)
+
+    // Request current room state when socket is ready
+    if (isConnected) {
+      addLog("Requesting current room state...")
+      socket.emit("get-room-state", { roomId })
+    }
 
     return () => {
-      console.log("Cleaning up socket listeners")
+      addLog("Cleaning up room socket listeners")
       socket.off("room-updated", handleRoomUpdated)
       socket.off("game-started", handleGameStarted)
       socket.off("room-error", handleRoomError)
-      socket.off("connect", handleConnect)
-      socket.off("disconnect", handleDisconnect)
     }
-  }, [socket, isConnected, roomId, playerName, isHost, router, hasJoined])
+  }, [socket, hasJoined, roomId, playerName, router, isConnected])
 
   if (!roomId || !playerName) {
     return null // Will redirect
@@ -145,6 +165,19 @@ export default function GameRoom() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Connection Status */}
+          {!isConnected && (
+            <Card className="mb-6 border-red-200 bg-red-50">
+              <CardContent className="pt-6">
+                <div className="flex items-center space-x-2 text-red-600">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="font-medium">Connection Issue</span>
+                </div>
+                <p className="text-sm text-red-600 mt-1">{error || "Not connected to server"}</p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Room Joiner Component */}
           {!hasJoined && (
@@ -210,11 +243,8 @@ export default function GameRoom() {
               </CardHeader>
               <CardContent>
                 <Button
-                  onClick={() => {
-                    // TODO: Implement start game
-                    router.push(`/game/${roomId}?name=${encodeURIComponent(playerName)}`)
-                  }}
-                  disabled={players.length < 2}
+                  onClick={startGame}
+                  disabled={players.length < 2 || !isConnected}
                   className="w-full bg-green-600 hover:bg-green-700"
                   size="lg"
                 >
@@ -223,6 +253,9 @@ export default function GameRoom() {
                 </Button>
                 {players.length < 2 && (
                   <p className="text-sm text-muted-foreground text-center mt-2">Need at least 2 players to start</p>
+                )}
+                {!isConnected && (
+                  <p className="text-sm text-red-600 text-center mt-2">Cannot start - not connected to server</p>
                 )}
               </CardContent>
             </Card>
@@ -241,6 +274,20 @@ export default function GameRoom() {
               </CardContent>
             </Card>
           )}
+
+          {/* Debug Logs */}
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <h3 className="font-bold mb-2 text-sm">Room Logs:</h3>
+              <div className="bg-gray-100 p-2 rounded text-xs max-h-32 overflow-y-auto">
+                {logs.map((log, index) => (
+                  <div key={index} className="font-mono">
+                    {log}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Back to Home Button */}
           <div className="text-center">

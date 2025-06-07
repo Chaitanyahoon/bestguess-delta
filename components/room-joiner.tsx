@@ -19,7 +19,7 @@ export function RoomJoiner({ roomId, playerName, isHost, onJoinSuccess, onJoinEr
   const [errorMessage, setErrorMessage] = useState<string>("")
   const [logs, setLogs] = useState<string[]>([])
 
-  const { socket, isConnected, isConnecting, error, connectionAttempts, reconnect, waitForConnection } = useSocket()
+  const { socket, isConnected, isConnecting, error, connectionAttempts, reconnect } = useSocket()
 
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString()
@@ -40,22 +40,39 @@ export function RoomJoiner({ roomId, playerName, isHost, onJoinSuccess, onJoinEr
       setJoinState("connecting")
       addLog("Starting join process...")
 
-      // Wait for socket connection
+      // Wait for socket connection with longer timeout
       addLog("Waiting for socket connection...")
-      const connectedSocket = await waitForConnection(15000)
 
-      if (!connectedSocket) {
-        throw new Error("Failed to establish socket connection")
+      let connectedSocket = socket
+
+      // If not connected, wait for connection with longer timeout
+      if (!isConnected) {
+        addLog("Socket not connected, waiting...")
+
+        const maxWaitTime = 30000 // 30 seconds
+        const startTime = Date.now()
+
+        while (!isConnected && Date.now() - startTime < maxWaitTime) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          connectedSocket = socket
+          if (connectedSocket?.connected) {
+            break
+          }
+        }
+
+        if (!connectedSocket?.connected) {
+          throw new Error("Failed to establish socket connection within 30 seconds")
+        }
       }
 
       addLog(`Socket connected: ${connectedSocket.id}`)
       setJoinState("joining")
 
-      // Set up response handlers
+      // Set up response handlers with longer timeout
       const joinPromise = new Promise<any>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error("Join request timeout - server did not respond"))
-        }, 10000)
+          reject(new Error("Join request timeout - server did not respond within 15 seconds"))
+        }, 15000)
 
         const handleRoomUpdated = (data: any) => {
           clearTimeout(timeout)
@@ -69,20 +86,29 @@ export function RoomJoiner({ roomId, playerName, isHost, onJoinSuccess, onJoinEr
           clearTimeout(timeout)
           connectedSocket.off("room-updated", handleRoomUpdated)
           connectedSocket.off("room-error", handleRoomError)
-          addLog(`Room error: ${error.message}`)
-          reject(new Error(error.message))
+          addLog(`Room error: ${error.message || error}`)
+          reject(new Error(error.message || error))
         }
 
         connectedSocket.once("room-updated", handleRoomUpdated)
         connectedSocket.once("room-error", handleRoomError)
 
-        // Send join request
-        addLog(`Sending join request for room ${roomId}`)
-        connectedSocket.emit("join-room", {
-          roomId: roomId.toUpperCase(),
+        // Send join request with validation
+        const roomData = {
+          roomId: roomId.toUpperCase().trim(),
           playerName: playerName.trim(),
           isHost,
-        })
+        }
+
+        addLog(`Sending join request: ${JSON.stringify(roomData)}`)
+
+        try {
+          connectedSocket.emit("join-room", roomData)
+          addLog("Join request sent successfully")
+        } catch (emitError) {
+          clearTimeout(timeout)
+          reject(new Error(`Failed to send join request: ${emitError}`))
+        }
       })
 
       const result = await joinPromise
@@ -95,11 +121,13 @@ export function RoomJoiner({ roomId, playerName, isHost, onJoinSuccess, onJoinEr
       setErrorMessage(errorMsg)
       onJoinError(errorMsg)
     }
-  }, [roomId, playerName, isHost, waitForConnection, onJoinSuccess, onJoinError, addLog])
+  }, [roomId, playerName, isHost, socket, isConnected, onJoinSuccess, onJoinError, addLog])
 
   const handleRetry = useCallback(() => {
     setJoinState("idle")
     setErrorMessage("")
+    setLogs([])
+
     if (!isConnected) {
       addLog("Reconnecting socket...")
       reconnect()
@@ -168,7 +196,7 @@ export function RoomJoiner({ roomId, playerName, isHost, onJoinSuccess, onJoinEr
 
           <div className="flex space-x-2">
             {canJoin && (
-              <Button onClick={attemptJoinRoom} className="flex-1" disabled={!isConnected}>
+              <Button onClick={attemptJoinRoom} className="flex-1" disabled={!socket}>
                 Join Room {roomId}
               </Button>
             )}

@@ -1,118 +1,208 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { io, type Socket } from "socket.io-client"
 
+interface SocketState {
+  socket: Socket | null
+  isConnected: boolean
+  isConnecting: boolean
+  error: string | null
+  connectionAttempts: number
+}
+
 export function useSocket() {
-  const [socket, setSocket] = useState<Socket | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [state, setState] = useState<SocketState>({
+    socket: null,
+    isConnected: false,
+    isConnecting: false,
+    error: null,
+    connectionAttempts: 0,
+  })
+
   const socketRef = useRef<Socket | null>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://beatmatch-jbss.onrender.com"
 
-  useEffect(() => {
-    // Prevent multiple connections
-    if (socketRef.current) {
-      console.log("Socket already exists, reusing existing connection")
-      return
+  const updateState = useCallback((updates: Partial<SocketState>) => {
+    setState((prev) => ({ ...prev, ...updates }))
+  }, [])
+
+  const createConnection = useCallback(() => {
+    // Don't create multiple connections
+    if (socketRef.current?.connected) {
+      console.log("Socket already connected, skipping creation")
+      return socketRef.current
     }
 
-    console.log(`🔌 Initializing socket connection to ${socketUrl}`)
+    // Clean up existing socket
+    if (socketRef.current) {
+      console.log("Cleaning up existing socket")
+      socketRef.current.removeAllListeners()
+      socketRef.current.disconnect()
+      socketRef.current = null
+    }
+
+    console.log(`🔌 Creating new socket connection to ${socketUrl}`)
+    updateState({ isConnecting: true, error: null })
 
     try {
       const socketInstance = io(socketUrl, {
         transports: ["websocket", "polling"],
-        timeout: 30000,
+        timeout: 30000, // Increase timeout
         forceNew: true,
         reconnection: true,
-        reconnectionAttempts: 10,
+        reconnectionAttempts: 10, // Increase attempts
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         autoConnect: true,
-        withCredentials: false, // Important for CORS
-        query: {
-          clientTime: new Date().toISOString(),
-          clientId: `client-${Math.random().toString(36).substring(2, 9)}`,
-        },
+        withCredentials: false,
       })
 
       socketRef.current = socketInstance
 
+      // Connection successful
       socketInstance.on("connect", () => {
-        console.log("✅ Socket connected:", socketInstance.id)
-        setIsConnected(true)
-        setError(null)
-        setSocket(socketInstance)
-      })
+        console.log("✅ Socket connected successfully:", socketInstance.id)
+        updateState({
+          socket: socketInstance,
+          isConnected: true,
+          isConnecting: false,
+          error: null,
+          connectionAttempts: 0,
+        })
 
-      socketInstance.on("disconnect", (reason) => {
-        console.log("❌ Socket disconnected:", reason)
-        setIsConnected(false)
-        if (reason === "io server disconnect") {
-          // Server disconnected, try to reconnect
-          socketInstance.connect()
-        }
-      })
-
-      socketInstance.on("connect_error", (error) => {
-        console.error("❌ Socket connection error:", error)
-        setError(error.message)
-        setIsConnected(false)
-      })
-
-      socketInstance.on("reconnect", (attemptNumber) => {
-        console.log("🔄 Socket reconnected after", attemptNumber, "attempts")
-        setIsConnected(true)
-        setError(null)
-      })
-
-      socketInstance.on("reconnect_error", (error) => {
-        console.error("🔄 Socket reconnection failed:", error)
-        setError("Reconnection failed")
-      })
-
-      socketInstance.on("reconnect_failed", () => {
-        console.error("💀 Socket reconnection failed permanently")
-        setError("Connection failed permanently")
-      })
-
-      // Test connection with ping
-      socketInstance.on("connect", () => {
+        // Test the connection immediately
         socketInstance.emit("ping")
         socketInstance.once("pong", () => {
-          console.log("🏓 Ping successful")
+          console.log("🏓 Connection test successful")
         })
       })
 
-      return () => {
-        console.log("🔌 Cleaning up socket connection...")
-        if (socketRef.current) {
-          socketRef.current.removeAllListeners()
-          socketRef.current.disconnect()
-          socketRef.current = null
+      // Connection failed
+      socketInstance.on("connect_error", (error) => {
+        console.error("❌ Socket connection error:", error)
+        updateState({
+          isConnected: false,
+          isConnecting: false,
+          error: `Connection failed: ${error.message || error}`,
+          connectionAttempts: (prev) => prev + 1,
+        })
+      })
+
+      // Disconnected
+      socketInstance.on("disconnect", (reason) => {
+        console.log("❌ Socket disconnected:", reason)
+        updateState({
+          isConnected: false,
+          isConnecting: false,
+          error: `Disconnected: ${reason}`,
+        })
+
+        // Auto-reconnect for certain disconnect reasons
+        if (reason === "io server disconnect" || reason === "transport close") {
+          console.log("🔄 Attempting auto-reconnect...")
+          reconnectTimeoutRef.current = setTimeout(() => {
+            createConnection()
+          }, 2000)
         }
-        setSocket(null)
-        setIsConnected(false)
-      }
+      })
+
+      return socketInstance
     } catch (err) {
-      console.error("Failed to initialize socket:", err)
-      setError("Socket initialization failed")
-      return () => {}
+      console.error("Failed to create socket:", err)
+      updateState({
+        isConnecting: false,
+        error: `Failed to initialize connection: ${err}`,
+      })
+      return null
     }
-  }, [socketUrl])
+  }, [socketUrl, updateState])
 
-  // Expose a function to manually reconnect
-  const reconnect = () => {
+  const reconnect = useCallback(() => {
     console.log("🔄 Manual reconnection requested")
-    if (socketRef.current) {
-      socketRef.current.disconnect()
-      socketRef.current.connect()
-    } else {
-      // If socket doesn't exist, force a re-render to create a new one
-      setSocket(null)
-      socketRef.current = null
-    }
-  }
 
-  return { socket, isConnected, error, reconnect }
+    // Clear any existing reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+
+    // Reset state
+    updateState({
+      isConnected: false,
+      isConnecting: true,
+      error: null,
+    })
+
+    // Create new connection
+    setTimeout(() => {
+      createConnection()
+    }, 1000)
+  }, [createConnection, updateState])
+
+  const waitForConnection = useCallback(
+    (timeout = 15000): Promise<Socket> => {
+      return new Promise((resolve, reject) => {
+        // If already connected, return immediately
+        if (state.isConnected && state.socket) {
+          resolve(state.socket)
+          return
+        }
+
+        // If not connecting, start connection
+        if (!state.isConnecting) {
+          createConnection()
+        }
+
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Connection timeout after ${timeout}ms`))
+        }, timeout)
+
+        const checkConnection = () => {
+          if (state.isConnected && state.socket) {
+            clearTimeout(timeoutId)
+            resolve(state.socket)
+          } else if (state.error && !state.isConnecting) {
+            clearTimeout(timeoutId)
+            reject(new Error(state.error))
+          } else {
+            setTimeout(checkConnection, 100)
+          }
+        }
+
+        checkConnection()
+      })
+    },
+    [state.isConnected, state.socket, state.isConnecting, state.error, createConnection],
+  )
+
+  // Initialize connection on mount
+  useEffect(() => {
+    createConnection()
+
+    return () => {
+      console.log("🔌 Cleaning up socket connection...")
+
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+      }
+
+      if (socketRef.current) {
+        socketRef.current.removeAllListeners()
+        socketRef.current.disconnect()
+        socketRef.current = null
+      }
+    }
+  }, [createConnection])
+
+  return {
+    socket: state.socket,
+    isConnected: state.isConnected,
+    isConnecting: state.isConnecting,
+    error: state.error,
+    connectionAttempts: state.connectionAttempts,
+    reconnect,
+    waitForConnection,
+  }
 }
